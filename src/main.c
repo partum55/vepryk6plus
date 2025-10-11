@@ -18,7 +18,8 @@
 void handle_mavlink_message(mavlink_message_t *msg);
 void handle_user_command(const char *command, int serial_fd, bool *set_to_manual);
 void send_mavlink_arm_command(int serial_fd, int arming_state);
-
+void send_manual_control_command(int serial_fd, int16_t x, int16_t y, int16_t z, int16_t r);
+void send_mavlink_set_mode(int serial_fd, enum MAV_MODE mode);
 
 int main() {
     int serial_fd;
