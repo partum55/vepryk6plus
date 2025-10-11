@@ -108,7 +108,7 @@ int main() {
         }
 
         if (set_to_manual){
-            send_manual_control_command(serial_fd, 300, 0, 500, 0);
+            send_manual_control_command(serial_fd, (int16_t)300, (int16_t)0, (int16_t)500, (int16_t)0);
         }
     }
 
@@ -125,7 +125,7 @@ void handle_user_command(const char *command, int serial_fd, bool *set_to_manual
         send_mavlink_arm_command(serial_fd, 0); // 0 to disarm
     } else if (strcmp(command, "manual") == 0){
         send_mavlink_set_mode(serial_fd, MAV_MODE_MANUAL_DISARMED);
-        set_to_manual = true;
+        *set_to_manual = true;
         printf("Switched to manual, trying to move");
     } else {
         printf("Unknown command: '%s'\n", command);
