@@ -16,7 +16,7 @@
 #define COMPONENT_ID 1
 
 void handle_mavlink_message(mavlink_message_t *msg);
-void handle_user_command(const char *command, int serial_fd);
+void handle_user_command(const char *command, int serial_fd, bool *set_to_manual);
 void send_mavlink_arm_command(int serial_fd, int arming_state);
 
 
@@ -47,6 +47,8 @@ int main() {
     printf("Serial port configured. Type commands like 'arm' or 'disarm' and press Enter.\n");
 
     time_t last_heartbeat_time = 0;
+
+    bool set_to_manual = false;
 
     while (1) {
         time_t current_time = time(NULL);
@@ -100,9 +102,13 @@ int main() {
                 char user_buf[100];
                 if (fgets(user_buf, sizeof(user_buf), stdin)) {
                     user_buf[strcspn(user_buf, "\n")] = 0;
-                    handle_user_command(user_buf, serial_fd);
+                    handle_user_command(user_buf, serial_fd, &set_to_manual);
                 }
             }
+        }
+
+        if (set_to_manual){
+            send_manual_control_command(serial_fd, 300, 0, 500, 0);
         }
     }
 
@@ -110,16 +116,48 @@ int main() {
     return 0;
 }
 
-void handle_user_command(const char *command, int serial_fd) {
+void handle_user_command(const char *command, int serial_fd, bool *set_to_manual) {
     if (strcmp(command, "arm") == 0) {
         printf("Sending ARM command...\n");
         send_mavlink_arm_command(serial_fd, 1); // 1 to arm
     } else if (strcmp(command, "disarm") == 0) {
         printf("Sending DISARM command...\n");
         send_mavlink_arm_command(serial_fd, 0); // 0 to disarm
+    } else if (strcmp(command, "manual") == 0){
+        send_mavlink_set_mode(serial_fd, MAV_MODE_MANUAL_DISARMED);
+        set_to_manual = true;
+        printf("Switched to manual, trying to move");
     } else {
         printf("Unknown command: '%s'\n", command);
     }
+}
+
+void send_mavlink_set_mode(int serial_fd, enum MAV_MODE mode) {
+    mavlink_message_t msg;
+    uint8_t buf[MAVLINK_MAX_PACKET_LEN];
+
+    // Pack a COMMAND_LONG message to send the MAV_CMD_DO_SET_MODE command
+    mavlink_msg_command_long_pack_chan(
+        SYSTEM_ID,                // This system's ID
+        COMPONENT_ID,             // This system's component ID
+        MAVLINK_COMM_0,           // The MAVLink channel to send on
+        &msg,
+        1,                        // Target System ID (1 is typically the vehicle)
+        0,                        // Target Component ID (0 means broadcast to all components)
+        MAV_CMD_DO_SET_MODE,
+        0,                        // Confirmation
+        (float)mode,              // param1: The base_mode from the MAV_MODE enum
+        0.0f,                     // param2: Custom mode (not used in this function)
+        0.0f,                     // param3: Custom sub-mode (not used in this function)
+        0.0f,                     // param4: Not used
+        0.0f,                     // param5: Not used
+        0.0f,                     // param6: Not used
+        0.0f                      // param7: Not used
+    );
+
+    uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
+    write(serial_fd, buf, len);
+    printf("Sent SET_MODE command with base_mode: %d\n", mode);
 }
 
 // Function to send an arm/disarm command
@@ -149,11 +187,42 @@ void send_mavlink_arm_command(int serial_fd, int arming_state) {
     write(serial_fd, buf, len);
 }
 
+void send_manual_control_command(int serial_fd, int16_t x, int16_t y, int16_t z, int16_t r) {
+    mavlink_message_t msg;
+    uint8_t buf[MAVLINK_MAX_PACKET_LEN];
+
+    // Pack the MANUAL_CONTROL message
+    mavlink_msg_manual_control_pack(
+        SYSTEM_ID,
+        COMPONENT_ID,
+        &msg,
+        1,
+        x,                        // Pitch command
+        y,                        // Roll command
+        z,                        // Thrust command
+        r,                        // Yaw command
+        0,                        // Buttons bitmask
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+    );
+
+    uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
+    write(serial_fd, buf, len);
+}
+
 // Function to handle incoming MAVLink messages
 void handle_mavlink_message(mavlink_message_t *msg) {
     switch (msg->msgid) {
         case MAVLINK_MSG_ID_HEARTBEAT:
-            printf("Received HEARTBEAT from vehicle.\n");
+            // printf("Received HEARTBEAT from vehicle.\n");
             break;
         case MAVLINK_MSG_ID_STATUSTEXT:
             mavlink_statustext_t status;
