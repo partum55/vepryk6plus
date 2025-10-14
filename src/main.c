@@ -16,9 +16,9 @@
 #define COMPONENT_ID 1
 
 void handle_mavlink_message(mavlink_message_t *msg);
-void handle_user_command(const char *command, int serial_fd, bool *set_to_manual);
+void handle_user_command(const char *command, int serial_fd);
 void send_mavlink_arm_command(int serial_fd, int arming_state);
-void send_manual_control_command(int serial_fd, int16_t x, int16_t y, int16_t z, int16_t r);
+void send_takeoff_command(int serial_fd, float target_altitude);
 void send_mavlink_set_mode(int serial_fd, enum MAV_MODE mode);
 
 int main() {
@@ -103,21 +103,18 @@ int main() {
                 char user_buf[100];
                 if (fgets(user_buf, sizeof(user_buf), stdin)) {
                     user_buf[strcspn(user_buf, "\n")] = 0;
-                    handle_user_command(user_buf, serial_fd, &set_to_manual);
+                    handle_user_command(user_buf, serial_fd);
                 }
             }
         }
 
-        if (set_to_manual){
-            send_manual_control_command(serial_fd, (int16_t)300, (int16_t)0, (int16_t)500, (int16_t)0);
-        }
     }
 
     close(serial_fd);
     return 0;
 }
 
-void handle_user_command(const char *command, int serial_fd, bool *set_to_manual) {
+void handle_user_command(const char *command, int serial_fd) {
     if (strcmp(command, "arm") == 0) {
         printf("Sending ARM command...\n");
         send_mavlink_arm_command(serial_fd, 1); // 1 to arm
@@ -125,9 +122,9 @@ void handle_user_command(const char *command, int serial_fd, bool *set_to_manual
         printf("Sending DISARM command...\n");
         send_mavlink_arm_command(serial_fd, 0); // 0 to disarm
     } else if (strcmp(command, "manual") == 0){
-        send_mavlink_set_mode(serial_fd, MAV_MODE_MANUAL_DISARMED);
-        *set_to_manual = true;
+        send_mavlink_set_mode(serial_fd, MAV_MODE_MANUAL_ARMED);
         printf("Switched to manual, trying to move");
+        send_takeoff_command(serial_fd, 10);
     } else {
         printf("Unknown command: '%s'\n", command);
     }
@@ -188,33 +185,30 @@ void send_mavlink_arm_command(int serial_fd, int arming_state) {
     write(serial_fd, buf, len);
 }
 
-void send_manual_control_command(int serial_fd, int16_t x, int16_t y, int16_t z, int16_t r) {
+void send_takeoff_command(int serial_fd, float target_altitude) {
+    // Initialize the MAVLink message
     mavlink_message_t msg;
     uint8_t buf[MAVLINK_MAX_PACKET_LEN];
 
-    // Pack the MANUAL_CONTROL message
-    mavlink_msg_manual_control_pack(
-        SYSTEM_ID,
-        COMPONENT_ID,
-        &msg,
-        1,
-        x,                        // Pitch command
-        y,                        // Roll command
-        z,                        // Thrust command
-        r,                        // Yaw command
-        0,                        // Buttons bitmask
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0
+    // Pack the COMMAND_LONG message
+    mavlink_msg_command_long_pack(
+        SYSTEM_ID,           // System ID of the sender (your GCS)
+        COMPONENT_ID,        // Component ID of the sender
+        &msg,                // MAVLink message to pack into
+        1,                   // Target system ID (the drone)
+        0,                   // Target component ID (usually 1 for autopilot)
+        MAV_CMD_NAV_TAKEOFF, // The command ID
+        0,                   // Confirmation
+        0,                   // param1: Minimum pitch (not used for takeoff, set to 0)
+        0,                   // param2: Empty
+        0,                   // param3: Empty
+        NAN,                 // param4: Yaw angle (NAN to use current heading)
+        0,                   // param5: Latitude (not used)
+        0,                   // param6: Longitude (not used)
+        target_altitude      // param7: Altitude in meters
     );
 
+    // Copy the message to a send buffer
     uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
     write(serial_fd, buf, len);
 }
