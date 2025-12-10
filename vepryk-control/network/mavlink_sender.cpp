@@ -80,20 +80,33 @@ bool MAVLinkSender::wait_for_heartbeat() {
     uint8_t buf[MAVLINK_MAX_PACKET_LEN];
     
     double start_time = get_time();
+    double last_heartbeat_sent = 0;
     double timeout = HEARTBEAT_TIMEOUT;
     
+    printf("Waiting for vehicle heartbeat (ignoring system %d)...\n", source_system);
+    
     while (get_time() - start_time < timeout) {
+        // Send heartbeat every second to announce presence
+        double now = get_time();
+        if (now - last_heartbeat_sent >= 1.0) {
+            sendHeartbeat();
+            last_heartbeat_sent = now;
+        }
+
         int bytes_read = bridge.receive(buf, sizeof(buf));
         
         if (bytes_read > 0) {
             for (int i = 0; i < bytes_read; i++) {
                 if (mavlink_parse_char(MAVLINK_COMM_0, buf[i], &msg, &status)) {
                     if (msg.msgid == MAVLINK_MSG_ID_HEARTBEAT) {
-                        target_system = msg.sysid;
-                        target_component = msg.compid;
-                        printf("Vehicle connected! System ID: %d, Component ID: %d\n", 
-                               target_system, target_component);
-                        return true;
+                        // Ignore heartbeats from ourselves or other GCS (MAVProxy is 255)
+                        if (msg.sysid != source_system && msg.sysid != 255) {
+                            target_system = msg.sysid;
+                            target_component = msg.compid;
+                            printf("Vehicle connected! System ID: %d, Component ID: %d\n", 
+                                   target_system, target_component);
+                            return true;
+                        }
                     }
                 }
             }
